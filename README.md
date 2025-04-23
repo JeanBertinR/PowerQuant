@@ -1,4 +1,4 @@
-# PowerQuant (or [Your Package Name])
+# PowerQuant
 
 [![PyPI version](https://badge.fury.io/py/[your_package_name_on_pypi].svg)](https://pypi.org/project/[your_package_name_on_pypi]/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
