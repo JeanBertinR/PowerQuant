@@ -1,1 +1,1 @@
-from .analysis import PowerQuantAnalysis
+from .core import get_spot_prices
