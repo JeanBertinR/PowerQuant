@@ -13,6 +13,8 @@ You can install PowerQuant using pip:
 
 ```bash
 pip install PowerQuant
+```
+
 
 <div style="text-align: center;">
   <img src="images/logo_PowerQuant.png" width="200" />
