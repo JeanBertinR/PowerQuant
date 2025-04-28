@@ -1,1 +1,4 @@
-PowerQuant.egg-info/PKG-INFO
+PowerQuant.egg-info/
+dist/
+build/
+
