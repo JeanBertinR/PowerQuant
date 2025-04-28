@@ -1,6 +1,5 @@
 # PowerQuant
 
-![PowerQuant Logo](images/logo_PowerQuant.png)
 
 [![PyPI version](https://badge.fury.io/py/[your_package_name_on_pypi].svg)](https://pypi.org/project/[your_package_name_on_pypi]/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -14,3 +13,7 @@ You can install PowerQuant using pip:
 
 ```bash
 pip install PowerQuant
+
+<div style="text-align: center;">
+  <img src="images/logo_PowerQuant.png" width="200" />
+</div>
