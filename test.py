@@ -9,3 +9,5 @@ end_date = "2025-04-25"
 
 prices = get_spot_prices(api_key, country, start_date, end_date)
 print(prices.head())
+
+

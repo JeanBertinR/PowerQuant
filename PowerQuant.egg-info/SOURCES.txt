@@ -1,0 +1,11 @@
+LICENSE
+README.md
+setup.py
+PowerQuant/__init__.py
+PowerQuant/core.py
+PowerQuant.egg-info/PKG-INFO
+PowerQuant.egg-info/SOURCES.txt
+PowerQuant.egg-info/dependency_links.txt
+PowerQuant.egg-info/requires.txt
+PowerQuant.egg-info/top_level.txt
+tests/test_core.py
