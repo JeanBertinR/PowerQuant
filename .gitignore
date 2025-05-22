@@ -1,4 +1,7 @@
+.env
 PowerQuant.egg-info/
 dist/
 build/
+
+
 
