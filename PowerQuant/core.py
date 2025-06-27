@@ -25,6 +25,7 @@ from sklearn.impute import SimpleImputer
 import plotly.graph_objects as go
 import os
 from dotenv import load_dotenv
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 
 def get_temp_smoothed_fr(start_date: str, end_date: str) -> pd.DataFrame:
@@ -80,19 +81,29 @@ def get_temp_smoothed_fr(start_date: str, end_date: str) -> pd.DataFrame:
     # Return only datetime and the averaged temperature
     return df_all[['temperature']].reset_index()
 
+import pandas as pd
+import numpy as np
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.ensemble import GradientBoostingRegressor
+import holidays
+
 def eval_forecast(df, datetime_col='datetime', target_col='consumption'):
-    # 1. Standardize date formats and clean NaN values
+    import pandas as pd
+    import holidays
+    from sklearn.impute import SimpleImputer
+    from sklearn.preprocessing import MinMaxScaler
+    from sklearn.ensemble import GradientBoostingRegressor
+
     df = df.copy()
     df[datetime_col] = pd.to_datetime(df[datetime_col], errors='coerce').dt.tz_localize(None)
     df = df.dropna(subset=[datetime_col, target_col])
 
-    # 2. Sort the data and split into two halves
     df = df.sort_values(datetime_col)
     midpoint = len(df) // 2
     train_df = df.iloc[:midpoint]
     test_df = df.iloc[midpoint:]
 
-    # 3. Retrieve smoothed temperatures
     full_start = df[datetime_col].min().strftime('%Y-%m-%d')
     full_end = df[datetime_col].max().strftime('%Y-%m-%d')
 
@@ -100,12 +111,10 @@ def eval_forecast(df, datetime_col='datetime', target_col='consumption'):
     temp_df = temp_df.rename(columns={'datetime': datetime_col})
     temp_df[datetime_col] = pd.to_datetime(temp_df[datetime_col], errors='coerce')
 
-    # 4. Merge temperature data with train/test sets
     train_df = pd.merge(train_df, temp_df, on=datetime_col, how='left')
     test_df = pd.merge(test_df, temp_df, on=datetime_col, how='left')
 
-    # 5. Feature engineering
-    def add_time_features(df):
+    def add_time_and_extreme_features(df):
         df['hour'] = df[datetime_col].dt.hour
         df['dayofweek'] = df[datetime_col].dt.dayofweek
         df['week'] = df[datetime_col].dt.isocalendar().week.astype(int)
@@ -114,19 +123,36 @@ def eval_forecast(df, datetime_col='datetime', target_col='consumption'):
         df['is_weekend'] = df['dayofweek'].apply(lambda x: 1 if x >= 5 else 0)
         fr_holidays = holidays.country_holidays('FR')
         df['is_holiday'] = df[datetime_col].dt.date.apply(lambda d: 1 if d in fr_holidays else 0)
+
+        # Variables météo extrêmes basées sur la température
+        df['temp_sq'] = df['temperature'] ** 2
+        df['temp_sqrt'] = df['temperature'].apply(lambda x: x ** 0.5 if x >= 0 else 0)
+        df['temp_canicule'] = (df['temperature'] > 30).astype(int)  # canicule au-dessus de 30°C
+        df['temp_froid'] = (df['temperature'] < 5).astype(int)      # froid intense en dessous de 5°C
+
+        # Indicateurs de plages de température (exemples)
+        df['temp_5_15'] = ((df['temperature'] >= 5) & (df['temperature'] < 15)).astype(int)
+        df['temp_15_25'] = ((df['temperature'] >= 15) & (df['temperature'] < 25)).astype(int)
+        df['temp_25_30'] = ((df['temperature'] >= 25) & (df['temperature'] < 30)).astype(int)
+
         return df
 
-    train_df = add_time_features(train_df)
-    test_df = add_time_features(test_df)
+    train_df = add_time_and_extreme_features(train_df)
+    test_df = add_time_and_extreme_features(test_df)
 
-    # 6. Define X and y
-    features = ['hour', 'dayofweek', 'week', 'month', 'year', 'is_weekend', 'is_holiday', 'temperature']
+    # Ajout des nouvelles features dans la liste
+    features = [
+        'hour', 'dayofweek', 'week', 'month', 'year',
+        'is_weekend', 'is_holiday', 'temperature',
+        'temp_sq', 'temp_sqrt', 'temp_canicule', 'temp_froid',
+        'temp_5_15', 'temp_15_25', 'temp_25_30'
+    ]
+
     X_train = train_df[features]
     y_train = train_df[target_col]
     X_test = test_df[features]
-    y_test = test_df[target_col]  # useful for later evaluation
+    y_test = test_df[target_col]
 
-    # 7. Imputation and normalization
     imputer = SimpleImputer(strategy='mean')
     X_train = imputer.fit_transform(X_train)
     X_test = imputer.transform(X_test)
@@ -135,16 +161,16 @@ def eval_forecast(df, datetime_col='datetime', target_col='consumption'):
     X_train = scaler.fit_transform(X_train)
     X_test = scaler.transform(X_test)
 
-    # 8. Train the model
     model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=5, random_state=42)
     model.fit(X_train, y_train)
 
-    # 9. Make predictions
     y_pred = model.predict(X_test)
     test_df = test_df.copy()
     test_df['forecast'] = y_pred
 
     return test_df
+
+
 
 def get_spot_prices(api_key: str, country_code: str, start_date: str, end_date: str) -> pd.Series:
     """
@@ -225,19 +251,6 @@ def plot_forecast(df, datetime_col='datetime', target_col='consumption'):
     # 6. Show the plot
     fig.show()
 
-def calculate_mape(df, datetime_col='datetime', target_col='consumption'):
-    # 1. Compute forecasts using eval_forecast
-    forecast_df = eval_forecast(df, datetime_col=datetime_col, target_col=target_col)
-
-    # 2. Extract actual and predicted values
-    y_true = forecast_df[target_col]
-    y_pred = forecast_df['forecast']
-
-    # 3. Calculate MAPE (as a percentage)
-    mape_value = mean_absolute_percentage_error(y_true, y_pred) * 100
-
-    return mape_value
-
 def calculate_prem_risk_vol(token: str, input_df: pd.DataFrame, datetime_col: str, target_col: str, plot_chart: bool = False, quantile: int = 50) -> float:
     """
     Calculates a risk premium based on multiple forward prices,
@@ -265,7 +278,7 @@ def calculate_prem_risk_vol(token: str, input_df: pd.DataFrame, datetime_col: st
     # 3. Retrieve spot prices for the covered period
     start_date = forecast_df[datetime_col].min().strftime('%Y-%m-%d')
     end_date = forecast_df[datetime_col].max().strftime('%Y-%m-%d')
-    spot_df = get_spot_prices(token, start_date, end_date)
+    spot_df = get_spot_prices(token, "FR", start_date, end_date)
     spot_df['delivery_from'] = pd.to_datetime(spot_df['delivery_from'])
 
     # 4. Retrieve forward prices for the dominant year
@@ -323,24 +336,98 @@ def calculate_prem_risk_vol(token: str, input_df: pd.DataFrame, datetime_col: st
     quantile_value = np.percentile(premiums, quantile)
     return quantile_value
 
-
-
+def consumption_price_correlation(input_df: pd.DataFrame, api_key: str, datetime_col='datetime', consumption_col='consumption', country_code='FR') -> float:
     """
-    Fetch forward prices from ENTSO-E for a given country and time range.
+    Calculates the correlation between electricity consumption and hourly spot prices.
 
-    :param api_key: ENTSO-E API key
-    :param country_code: Country code (e.g., 'FR' for France)
-    :param start_date: Start date in 'YYYY-MM-DD' format
-    :param end_date: End date in 'YYYY-MM-DD' format
-    :return: Pandas Series with hourly spot prices
+    :param input_df: DataFrame containing hourly consumption data (with datetime_col and consumption_col)
+    :param api_key: ENTSO-E API key to fetch spot prices
+    :param datetime_col: Name of the datetime column
+    :param consumption_col: Name of the consumption column
+    :param country_code: Country code for price retrieval (e.g., 'FR' for France)
+    :return: Pearson correlation coefficient
     """
-    client = EntsoePandasClient(api_key=api_key)
-    start = pd.Timestamp(start_date, tz='Europe/Brussels')
-    end = pd.Timestamp(end_date, tz='Europe/Brussels')
+    # Format datetime column
+    df = input_df.copy()
+    df[datetime_col] = pd.to_datetime(df[datetime_col])
+    start_date = df[datetime_col].min().strftime('%Y-%m-%d')
+    end_date = df[datetime_col].max().strftime('%Y-%m-%d')
 
-    try:
-        prices = client.query_load_forecast(country_code, start=start, end=end)
-        return prices
-    except Exception as e:
-        print(f"Error while retrieving spot prices: {e}")
-        return pd.Series()
+    # Fetch spot prices
+    spot_prices = get_spot_prices(api_key, country_code, start_date, end_date)
+    spot_prices = spot_prices.reset_index()
+    spot_prices.rename(columns={'date': datetime_col, 'price': 'spot_price'}, inplace=True)
+
+    # Merge consumption and price data
+    merged = pd.merge(df, spot_prices, on=datetime_col, how='inner').dropna(subset=[consumption_col, 'spot_price'])
+
+    # Compute correlation
+    corr = merged[consumption_col].corr(merged['spot_price'])
+    return corr
+
+def forecast_performance_report(forecast_df: pd.DataFrame, target_col='consumption', forecast_col='forecast') -> dict:
+    """
+    Generates a performance report of the forecast using multiple metrics.
+
+    :param forecast_df: DataFrame containing actual (target_col) and predicted (forecast_col) values
+    :param target_col: Name of the actual value column
+    :param forecast_col: Name of the predicted value column
+    :return: Dictionary containing metrics (MAPE, MAE, RMSE, R2)
+    """
+    y_true = forecast_df[target_col].values
+    y_pred = forecast_df[forecast_col].values
+    
+    mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
+    mae = mean_absolute_error(y_true, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    r2 = r2_score(y_true, y_pred)
+
+    return {
+        "MAPE (%)": mape,
+        "MAE": mae,
+        "RMSE": rmse,
+        "R2": r2
+    }
+
+def monte_carlo_consumption_simulation(df: pd.DataFrame, n_simulations: int = 100, datetime_col='datetime', consumption_col='consumption', temp_std_dev=2.0):
+    """
+    Simulates multiple consumption trajectories by introducing uncertainty on temperature,
+    adding Gaussian noise to the temperatures used for forecasting.
+
+    :param df: DataFrame with initial data (datetime_col, consumption_col)
+    :param n_simulations: Number of Monte Carlo simulations
+    :param datetime_col: Name of the datetime column
+    :param consumption_col: Name of the consumption column
+    :param temp_std_dev: Standard deviation of Gaussian noise added to temperature (in degrees Celsius)
+    :return: DataFrame containing datetime and simulated consumption columns ['sim_1', 'sim_2', ...]
+    """
+    base_forecast_df = eval_forecast(df, datetime_col, consumption_col)
+    
+    sim_results = pd.DataFrame({datetime_col: base_forecast_df[datetime_col]})
+
+    for i in range(n_simulations):
+        # Perturb temperature with Gaussian noise
+        perturbed_temp = base_forecast_df['temperature'] + np.random.normal(0, temp_std_dev, size=len(base_forecast_df))
+        sim_df = base_forecast_df.copy()
+        sim_df['temperature'] = perturbed_temp
+
+        # Recalculate features and predictions with the existing model
+        # For simplicity, retrain the model on each simulation (can be optimized)
+        features = ['hour', 'dayofweek', 'week', 'month', 'year', 'is_weekend', 'is_holiday', 'temperature']
+
+        X = sim_df[features]
+        imputer = SimpleImputer(strategy='mean')
+        X = imputer.fit_transform(X)
+        scaler = MinMaxScaler()
+        X = scaler.fit_transform(X)
+
+        model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=5, random_state=42)
+        y_train = sim_df[consumption_col]
+        model.fit(X, y_train)
+        y_sim = model.predict(X)
+        sim_results[f'sim_{i+1}'] = y_sim
+
+    return sim_results
+
+
+
